@@ -18,7 +18,7 @@ type DefaultMatcher struct {
 func (m DefaultMatcher) Match(node *Node) bool {
 	switch {
 	// Never crawl outside of the seed domain
-	case m.seed.Host != node.url.Host:
+	case m.seed.Host != node.Url.Host:
 		return false
 	}
 	return true

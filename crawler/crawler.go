@@ -4,86 +4,73 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/fetchbot"
 	"github.com/gonum/graph"
-	"github.com/gonum/graph/encoding/dot"
 	"github.com/gonum/graph/simple"
 	"github.com/gonum/graph/traverse"
 )
 
 type Node struct {
 	id       int
-	response *http.Response
-	url      *url.URL
+	Response *http.Response
+	Url      *url.URL
+	err      error
 }
 
 func (n Node) ID() int { return n.id }
 
-func (n Node) DOTAttributes() []dot.Attribute {
-	attributes := []dot.Attribute{
-		dot.Attribute{Key: "label", Value: fmt.Sprintf("\"%s\"", n.url.String())},
-	}
-	if n.response != nil {
-		code := n.response.StatusCode
-		switch {
-		case code >= 200 && code < 300:
-			attributes = append(attributes, dot.Attribute{Key: "color", Value: "green"})
-		case code >= 400:
-			attributes = append(attributes, dot.Attribute{Key: "color", Value: "red"})
-		}
-	}
-	return attributes
-}
+// Nodes implements a sortable array of Nodes
+type Nodes []*Node
 
-type Recorder struct {
+func (n Nodes) Len() int           { return len(n) }
+func (n Nodes) Less(i, j int) bool { return n[i].ID() < n[j].ID() }
+func (n Nodes) Swap(i, j int)      { n[i], n[j] = n[j], n[i] }
+
+// Scheduler schedules a Node for crawling.
+type Scheduler struct {
 	lock     sync.Mutex
-	depth    int
-	maxDepth int
-	nodes    map[string]*Node
-	schedule map[string]*Node
-	graph    *simple.DirectedGraph
+	schedule map[string]bool
 }
 
-// Exceeded checks to see if the recorder has exceeded
-// the maximum depth we can crawl.
-func (r *Recorder) Exceeded() bool { return r.depth > r.maxDepth }
-
-// Scheduled checks to see if the URL has already been
-// scheduled for crawling.
-func (r *Recorder) Scheduled(node *Node) bool {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-	_, ok := r.schedule[node.url.String()]
+func (s *Scheduler) Scheduled(node *Node) bool {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	key := node.Url.String()
+	_, ok := s.schedule[key]
 	return ok
 }
 
-// Schedule adds the Node to the schedule.
-func (r *Recorder) Schedule(node *Node) error {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-	url := node.url.String()
-	if _, ok := r.schedule[url]; ok {
-		return fmt.Errorf("ERR: %s already scheduled", url)
+func (s *Scheduler) Schedule(node *Node) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	key := node.Url.String()
+	if _, ok := s.schedule[key]; !ok {
+		s.schedule[key] = true
+		return nil
 	}
-	r.nodes[url] = node
-	return nil
+	return fmt.Errorf("Node %s already scheduled", key)
 }
 
-// Recorded checks if the URL has already been recorded.
-func (r *Recorder) Recorded(node *Node) bool {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-	// Check if the node has been saved
-	if node, ok := r.nodes[node.url.String()]; ok {
-		// Verify the http response has been recorded
-		if node.response != nil {
-			return true
-		}
+// Recorder saves the result of crawling a Node
+// in a graph structure.
+type Recorder struct {
+	lock  sync.Mutex
+	nodes map[string]int // map URL to Node ID
+	graph *simple.DirectedGraph
+}
+
+func (r *Recorder) Nodes() []*Node {
+	ns := r.graph.Nodes()
+	nodes := make(Nodes, len(ns))
+	for i, n := range ns {
+		nodes[i] = n.(*Node)
 	}
-	return false
+	sort.Sort(sort.Reverse(nodes))
+	return nodes
 }
 
 // Record records the URL to the and returns a Node.
@@ -93,137 +80,129 @@ func (r *Recorder) Record(url *url.URL, res *http.Response) *Node {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	// Check if a Node already exists for the URL
-	node, _ := r.nodes[url.String()]
+	var node *Node
+	key := url.String()
+	if id, ok := r.nodes[key]; ok {
+		node = r.graph.Node(id).(*Node)
+	}
 	if node == nil {
 		node = &Node{
-			id:  len(r.nodes),
-			url: url,
+			id: r.graph.NewNodeID(),
+			//id:  len(r.nodes),
+			Url: url,
 		}
+		r.graph.AddNode(node)
 	}
-	if node.response == nil && res != nil {
-		node.response = res
-		r.depth++
+	// If the Node has no recorded response
+	// and we were given one, record it.
+	if node.Response == nil && res != nil {
+		node.Response = res
 	}
 	// Save the node into the Recorder
-	r.nodes[node.url.String()] = node
+	r.nodes[key] = node.ID()
 	return node
 }
 
-type Crawler struct {
-	Seed     *url.URL
-	Fetcher  *fetchbot.Fetcher
-	Recorder *Recorder
-	parser   Parser
-	matcher  Matcher
+// Next returns the next eligable Node to schedule
+func (r *Recorder) Next(matcher Matcher) (*Node, int) {
+	if len(r.graph.Nodes()) == 0 {
+		return nil, 0
+	}
+	var depth int
+	t := traverse.BreadthFirst{}
+	match := t.Walk(r.graph, r.graph.Node(0), func(n graph.Node, i int) bool {
+		depth = i
+		current := n.(*Node)
+		return matcher.Match(current)
+	})
+	// No nodes met our criteria
+	if match == nil {
+		return nil, depth
+	}
+	node := match.(*Node)
+	return node, depth
 }
 
 // Return a fetchbot Mux
-func (crawler *Crawler) mux() *fetchbot.Mux {
+func mux(recorder *Recorder, parser Parser) *fetchbot.Mux {
 	mux := fetchbot.NewMux()
 	mux.Response().Method("GET").Handler(fetchbot.HandlerFunc(
 		func(ctx *fetchbot.Context, res *http.Response, err error) {
-			if err != nil {
-				fmt.Errorf("ERR: %s", err.Error())
-				return
-			}
 			// Parent is the current response we are recording
-			parent := crawler.Recorder.Record(ctx.Cmd.URL(), res)
-			// Check to see if we've crawled enough
-			if crawler.Recorder.Exceeded() {
-				ctx.Q.Cancel()
-				return
-			}
+			parent := recorder.Record(ctx.Cmd.URL(), res)
+			// Attach any error to the Node
+			parent.err = err
 			// Array of all links contained in the response
-			links := crawler.parser.Links(res)
+			links := parser.Links(res)
 			for _, link := range links {
 				// Record the link as a Node. If the link was already
 				// recorded the existing Node is returned.
-				node := crawler.Recorder.Record(link, nil)
+				node := recorder.Record(link, nil)
 				// Ignore references to the same page
 				if parent.ID() != node.ID() {
 					// Create an edge between the parent and all of it's linked nodes.
-					crawler.Recorder.graph.SetEdge(simple.Edge{F: parent, T: node, W: 0.0})
-				}
-				// If this Node matches our criteria as crawlable
-				if crawler.matcher.Match(node) {
-					// Node has already be recorded, nothing to do.
-					if crawler.Recorder.Recorded(node) {
-						continue
-					}
-					// Node has already been scheduled, nothing to do.
-					if crawler.Recorder.Scheduled(node) {
-						continue
-					}
-					// Set the Node as scheduled
-					if err = crawler.Recorder.Schedule(node); err != nil {
-						// If we encounter an error scheduling, just continue.
-						fmt.Errorf("ERR: Problem scheduling: %s", node.url.String())
-						continue
-					}
-					// Send GET request to Crawler queue
-					if _, err = ctx.Q.SendStringGet(node.url.String()); err != nil {
-						// Fatal error
-						panic(err)
-					}
+					recorder.graph.SetEdge(simple.Edge{F: parent, T: node, W: 0.0})
 				}
 			}
 		}))
 	return mux
 }
 
+type Crawler struct {
+	Seed     *url.URL
+	Recorder *Recorder
+	maxDepth int
+	parser   Parser
+	matcher  Matcher
+	fetcher  *fetchbot.Fetcher
+}
+
 // NewCrawler returns a new Crawler structure
-func NewCrawler(seed string, depth int) (*Crawler, error) {
-	parser, err := NewDefaultParser(seed)
-	if err != nil {
-		return nil, err
-	}
+func NewCrawler(seed *url.URL, maxDepth int) *Crawler {
 	crawler := &Crawler{
-		Seed:    parser.seed,
-		parser:  parser,
-		matcher: &DefaultMatcher{seed: parser.seed},
+		Seed:     seed,
+		maxDepth: maxDepth,
 		Recorder: &Recorder{
-			maxDepth: depth,
-			nodes:    map[string]*Node{},
-			schedule: map[string]*Node{},
-			graph:    simple.NewDirectedGraph(0.0, 0.0),
+			nodes: map[string]int{},
+			graph: simple.NewDirectedGraph(0.0, 0.0),
 		},
+		parser:  &DefaultParser{seed: seed},
+		matcher: &DefaultMatcher{seed: seed},
 	}
-	crawler.Fetcher = fetchbot.New(crawler.mux())
-	crawler.Fetcher.AutoClose = true
-	crawler.Fetcher.WorkerIdleTTL = 5 * time.Second
-	return crawler, nil
+	crawler.fetcher = fetchbot.New(mux(crawler.Recorder, crawler.parser))
+	crawler.fetcher.AutoClose = true
+	crawler.fetcher.WorkerIdleTTL = 15 * time.Second
+	return crawler
 }
 
 func (crawler *Crawler) Crawl() error {
-	q := crawler.Fetcher.Start()
+	scheduler := &Scheduler{schedule: map[string]bool{}}
 	// Start processing
+	q := crawler.fetcher.Start()
 	if _, err := q.SendStringGet(crawler.Seed.String()); err != nil {
 		return err
 	}
-	q.Block()
-	//Dot(r.graph)
-	//Traverse(r.graph)
-	return nil
-}
-
-func Dot(g *simple.DirectedGraph) {
-	data, err := dot.Marshal(g, "inquire", "", "", false)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(string(data))
-}
-
-func Traverse(g *simple.DirectedGraph) {
-	t := traverse.BreadthFirst{
-		Visit: func(x, y graph.Node) { fmt.Println("Visited: ", x, " ", y) },
-	}
-	node := g.Node(0)
-	for {
-		fmt.Println("Node:: ", node)
-		if node == nil {
-			break
+	running := true
+	go func() {
+		for running {
+			node, depth := crawler.Recorder.Next(crawler.matcher)
+			if depth >= crawler.maxDepth {
+				fmt.Println("shutdown", crawler.maxDepth, depth)
+				q.Cancel()
+				break
+			}
+			if node != nil {
+				if !scheduler.Scheduled(node) {
+					scheduler.Schedule(node)
+					if _, err := q.SendStringGet(node.Url.String()); err != nil {
+						panic(err)
+					}
+				}
+			}
+			time.Sleep(1 * time.Second)
 		}
-		node = t.Walk(g, node, nil)
-	}
+	}()
+	q.Block()
+	running = false
+	return nil
 }

@@ -18,21 +18,6 @@ type DefaultParser struct {
 	seed *url.URL
 }
 
-// NewParser creates a new Parser
-func NewDefaultParser(seed string) (*DefaultParser, error) {
-	u, err := url.Parse(seed)
-	if err != nil {
-		return nil, err
-	}
-	p := &DefaultParser{}
-	u, err = url.Parse(purell.NormalizeURL(u, purell.FlagsUsuallySafeGreedy|purell.FlagRemoveFragment))
-	if err != nil {
-		return nil, err
-	}
-	p.seed = u
-	return p, nil
-}
-
 // Links returns an array of unique, normalized url.URL
 func (p *DefaultParser) Links(res *http.Response) []*url.URL {
 	duplicates := map[string]bool{}
