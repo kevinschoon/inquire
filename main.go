@@ -12,23 +12,42 @@ import (
 	"flag"
 	"fmt"
 	"github.com/kevinschoon/inquire/crawler"
+	"github.com/kevinschoon/inquire/ui"
+	"net/url"
 	"os"
 )
 
 var (
-	seed     = flag.String("seed", "", "seed URL")
-	maxDepth = flag.Int("depth", 5, "Maximum depth")
+	seed      = flag.String("seed", "", "seed URL")
+	maxDepth  = flag.Int("depth", 5, "Maximum depth")
+	disableUI = flag.Bool("disableUI", false, "Disable UI")
 )
 
 func main() {
 	flag.Parse()
-	c, err := crawler.NewCrawler(*seed, *maxDepth)
+	u, err := url.Parse(*seed)
 	if err != nil {
 		fmt.Println("Error: ", err.Error())
 		os.Exit(1)
 	}
-	if err = c.Crawl(); err != nil {
+	c := crawler.NewCrawler(u, *maxDepth)
+	go func() {
+		if err = c.Crawl(); err != nil {
+			fmt.Println("Error: ", err.Error())
+			os.Exit(1)
+		}
+	}()
+	if err = ui.UI(c); err != nil {
 		fmt.Println("Error: ", err.Error())
 		os.Exit(1)
 	}
+
+	/*
+		if !*disableUI {
+			if err = ui.UI(c); err != nil {
+				fmt.Println("Error: ", err.Error())
+				caught = err
+			}
+		}
+	*/
 }
