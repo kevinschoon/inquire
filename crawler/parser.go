@@ -10,54 +10,52 @@ import (
 
 // Parser parses an HTTP request returning specific information
 type Parser interface {
-	Links(*http.Response) []*url.URL
-	Normalize(*url.URL) (*url.URL, error)
+	Links(*http.Response) map[string]*url.URL
 }
 
 type DefaultParser struct {
-	seed *url.URL
+	Seed *url.URL
 }
 
 // Links returns an array of unique, normalized url.URL
-func (p *DefaultParser) Links(res *http.Response) []*url.URL {
-	duplicates := map[string]bool{}
-	links := []*url.URL{}
+func (p *DefaultParser) Links(res *http.Response) map[string]*url.URL {
+	links := map[string]*url.URL{}
 	doc, err := goquery.NewDocumentFromResponse(res)
 	if err != nil {
 		fmt.Println("ERR: Bad document, ", err)
 		return links
 	}
-	doc.Find("a[href]").Each(func(i int, s *goquery.Selection) {
-		val, _ := s.Attr("href")
-		if url, err := url.Parse(val); err == nil {
-			if url.Scheme == "http" || url.Scheme == "https" || url.Scheme == "" {
-				url, err = p.Normalize(url)
-				if err != nil {
-					fmt.Printf("ERR: Bad URL %s", err.Error())
-					return
-				}
-				if _, ok := duplicates[url.String()]; !ok {
-					duplicates[url.String()] = true
-					links = append(links, url)
+	for _, node := range doc.Find("*").Nodes {
+		for _, value := range node.Attr {
+			if value.Key == "href" || value.Key == "src" {
+				if u := p.normalize(value.Val); u != nil {
+					key := u.String()
+					if _, ok := links[key]; !ok {
+						links[key] = u
+					}
 				}
 			}
 		}
-	})
+	}
 	return links
 }
 
-func (p *DefaultParser) Normalize(u *url.URL) (*url.URL, error) {
-	raw := purell.NormalizeURL(u, purell.FlagsUsuallySafeGreedy|purell.FlagRemoveFragment)
+func (p *DefaultParser) normalize(raw string) *url.URL {
+	raw, err := purell.NormalizeURLString(raw, purell.FlagsUsuallySafeGreedy|purell.FlagRemoveFragment)
+	if err != nil {
+		return nil
+	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return nil, err
+		return nil
 	}
 	if u.Scheme == "" {
-		u.Scheme = p.seed.Scheme
+		u.Scheme = p.Seed.Scheme
 	}
 	if u.Host == "" {
-		u.Host = p.seed.Host
+		u.Host = p.Seed.Host
 	}
+	// Never follow url params
 	u.RawQuery = ""
-	return u, nil
+	return u
 }
