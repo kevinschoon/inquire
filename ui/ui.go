@@ -5,114 +5,144 @@ package ui
 
 import (
 	"fmt"
-	ui "github.com/gizak/termui"
+	"github.com/gizak/termui"
 	"github.com/kevinschoon/inquire/crawler"
-	"math"
+	"os"
 )
 
 // UI runs the crawler and updates the user's console
-func UI(crawler *crawler.Crawler) error {
-	if err := ui.Init(); err != nil {
+func UI(c *crawler.Crawler, shutdown chan os.Signal) error {
+	if err := termui.Init(); err != nil {
 		return err
 	}
-	defer ui.Close()
+	defer termui.Close()
 
-	sinps := (func() []float64 {
-		n := 400
-		ps := make([]float64, n)
-		for i := range ps {
-			ps[i] = 1 + math.Sin(float64(i)/5)
-		}
-		return ps
-	})()
-	sinpsint := (func() []int {
-		ps := make([]int, len(sinps))
-		for i, v := range sinps {
-			ps[i] = int(100*v + 10)
-		}
-		return ps
-	})()
+	// Current section
+	currentSection := "nodes"
 
-	title := ui.NewPar(fmt.Sprintf("Crawling %s", crawler.Seed.String()))
+	title := termui.NewPar("[Q](bg-white,fg-black)uit [N](bg-white,fg-black)odes [S](bg-white,fg-black)chedule [L](bg-white,fg-black)ogs")
 	title.Height = 3
-	title.Width = 17
-	title.X = 20
-	title.BorderLabel = "Inquire"
+	title.Border = true
 
-	spark := ui.Sparkline{}
-	spark.Height = 8
-	spdata := sinpsint
-	spark.Data = spdata[:100]
-	spark.LineColor = ui.ColorCyan
-	spark.TitleColor = ui.ColorWhite
+	// Top Left Panel
+	leftStatus := termui.NewList()
+	leftStatus.Items = []string{}
+	leftStatus.Height = 8
 
-	sp := ui.NewSparklines(spark)
-	sp.Height = 11
-	sp.BorderLabel = "Sparkline"
+	// Top Right Panel
+	rightStatus := termui.NewList()
+	rightStatus.Items = []string{}
+	rightStatus.Height = 8
 
-	lc := ui.NewLineChart()
-	lc.BorderLabel = "braille-mode Line Chart"
-	lc.Data = sinps
-	lc.Height = 11
-	lc.AxesColor = ui.ColorWhite
-	lc.LineColor = ui.ColorYellow | ui.AttrBold
-
-	gs := make([]*ui.Gauge, 3)
-	for i := range gs {
-		gs[i] = ui.NewGauge()
-		//gs[i].LabelAlign = ui.AlignCenter
-		gs[i].Height = 2
-		gs[i].Border = false
-		gs[i].Percent = i * 10
-		gs[i].PaddingBottom = 1
-		gs[i].BarColor = ui.ColorRed
-	}
-
-	responses := ui.NewList()
-	responses.BorderLabel = "Crawled"
-	responses.Items = []string{}
-	responses.Height = ui.TermHeight()
+	// Main section
+	mainSection := termui.NewList()
+	mainSection.BorderLabel = ""
+	mainSection.Items = []string{}
+	mainSection.Height = termui.TermHeight()
 	// build layout
-	ui.Body.AddRows(
-		ui.NewRow(
-			ui.NewCol(6, 0, sp),
-			ui.NewCol(6, 0, lc),
+	termui.Body.AddRows(
+		termui.NewRow(
+			termui.NewCol(12, 0, title),
 		),
-		ui.NewRow(
-			ui.NewCol(12, 0, responses),
-		))
+		termui.NewRow(
+			termui.NewCol(6, 0, leftStatus),
+			termui.NewCol(6, 0, rightStatus),
+		),
+		termui.NewRow(
+			termui.NewCol(12, 0, mainSection),
+		),
+	)
 
 	// calculate layout
-	ui.Body.Align()
+	termui.Body.Align()
 
-	ui.Render(ui.Body)
+	termui.Render(termui.Body)
 
-	// Shut down on "q"
-	ui.Handle("/sys/kbd/q", func(ui.Event) {
-		ui.StopLoop()
+	termui.Handle("/timer/1s", func(e termui.Event) {
+		status := c.Status()
+		//leftStatus.Items = LeftStatus(c)
+		rightStatus.Items = RightStatus(status)
+		mainSection.Items, mainSection.BorderLabel = MainSection(status, currentSection)
+		termui.Render(termui.Body)
 	})
 
-	ui.Handle("/timer/1s", func(e ui.Event) {
-		responses.Items = []string{}
-		for _, node := range crawler.Recorder.Nodes() {
-			var code int
-			if node.Response != nil {
-				code = node.Response.StatusCode
-			}
-			line := fmt.Sprintf("%d - %s - %d", node.ID(), node.Url.String(), code)
-			responses.Items = append(responses.Items, line)
-		}
-		ui.Render(ui.Body)
+	termui.Handle("/sys/wnd/resize", func(e termui.Event) {
+		termui.Body.Width = termui.TermWidth()
+		//mainSection.Height = termui.TermHeight()
+		termui.Body.Align()
+		termui.Clear()
+		termui.Render(termui.Body)
 	})
 
-	ui.Handle("/sys/wnd/resize", func(e ui.Event) {
-		ui.Body.Width = ui.TermWidth()
-		responses.Height = ui.TermHeight()
-		ui.Body.Align()
-		ui.Clear()
-		ui.Render(ui.Body)
+	// Quit
+	termui.Handle("/sys/kbd/q", func(termui.Event) {
+		shutdown <- os.Interrupt
+		termui.StopLoop()
 	})
 
-	ui.Loop()
+	// Display Nodes
+	termui.Handle("/sys/kbd/n", func(termui.Event) {
+		currentSection = "nodes"
+		status := c.Status()
+		mainSection.Items, mainSection.BorderLabel = MainSection(status, currentSection)
+		termui.Render(termui.Body)
+	})
+
+	// Display Schedule
+	termui.Handle("/sys/kbd/s", func(termui.Event) {
+		currentSection = "schedule"
+		status := c.Status()
+		mainSection.Items, mainSection.BorderLabel = MainSection(status, currentSection)
+		termui.Render(termui.Body)
+	})
+
+	termui.Loop()
 	return nil
+}
+
+// RightStatus returns status data for the top right panel
+func RightStatus(status *crawler.Status) []string {
+	s := make([]string, 3)
+	if status.Running {
+		s[0] = "Scheduler: [online](fg-green)"
+	} else {
+		s[0] = "Scheduler: [offline](fg-red)"
+	}
+	s[1] = fmt.Sprintf("Depth: %d", status.Depth)
+	s[2] = fmt.Sprintf("Seed: %s", status.Options.Seed.String())
+	return s
+}
+
+// LeftStatus returns status data for the top left panel
+func LeftStatus(s *crawler.Status) []string {
+	// TODO
+	return []string{"", "", "", ""}
+}
+
+// MainSection updates the main section of the terminal
+// It returns the section data and boader label
+func MainSection(status *crawler.Status, section string) ([]string, string) {
+	var label string
+	results := []string{}
+	switch section {
+	case "nodes":
+		label = "STATUS DURATION    URL"
+		for _, node := range status.Nodes {
+			var (
+				status   = "[?](fg-white)"
+				duration = "?" // TODO
+				url      = node.URL.String()
+			)
+			if data := node.Data(); data != nil {
+				switch {
+				case data.Code >= 200 && data.Code < 300:
+					status = fmt.Sprintf("[%d](fg-green)", data.Code)
+				case data.Code > 400:
+					status = fmt.Sprintf("[%d](fg-red)", data.Code)
+				}
+			}
+			results = append(results, fmt.Sprintf("%s    %s          %s", status, duration, url))
+		}
+	}
+	return results, label
 }

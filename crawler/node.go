@@ -25,6 +25,10 @@ func (n *Node) Record(res *http.Response) {
 	}
 }
 
+func (n *Node) Data() *ResponseData {
+	return n.data
+}
+
 func (n Node) ID() int { return n.id }
 
 // Nodes implements a sortable array of Nodes

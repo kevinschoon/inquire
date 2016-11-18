@@ -13,7 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/kevinschoon/inquire/crawler"
-	//"github.com/kevinschoon/inquire/ui"
+	"github.com/kevinschoon/inquire/ui"
 	"log"
 	"net/url"
 	"os"
@@ -47,6 +47,16 @@ func main() {
 	if *debug {
 		logger.SetOutput(os.Stdout)
 		if err := c.Run(shutdown); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		// TODO Send buffered log to UI
+		go func() {
+			if err := c.Run(shutdown); err != nil {
+				log.Fatal(err)
+			}
+		}()
+		if err = ui.UI(c, shutdown); err != nil {
 			log.Fatal(err)
 		}
 	}

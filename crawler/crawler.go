@@ -36,7 +36,12 @@ type Options struct {
 	Parser   Parser
 }
 
-func (c *Crawler) Block() {}
+type Status struct {
+	Running bool
+	Depth   int
+	Options *Options
+	Nodes   []*Node
+}
 
 type Crawler struct {
 	recorder  *Recorder
@@ -58,6 +63,15 @@ func NewCrawler(opts *Options) *Crawler {
 	crawler.fetcher = fetchbot.New(mux(crawler))
 	crawler.log.Println("Crawler initialized")
 	return crawler
+}
+
+func (crawler Crawler) Status() *Status {
+	return &Status{
+		Running: crawler.running,
+		Depth:   crawler.scheduler.Depth(),
+		Options: crawler.opts,
+		Nodes:   crawler.recorder.Nodes(),
+	}
 }
 
 func (crawler *Crawler) Run(shutdown chan os.Signal) error {
@@ -82,8 +96,10 @@ func (crawler *Crawler) Run(shutdown chan os.Signal) error {
 		sig := <-shutdown
 		crawler.scheduler.shutdown <- sig
 		q.Cancel()
+		crawler.running = false
 	}()
 
+	crawler.running = true
 	wg.Wait()
 	return nil
 }
