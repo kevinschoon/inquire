@@ -126,11 +126,12 @@ func MainSection(status *crawler.Status, section string) ([]string, string) {
 	results := []string{}
 	switch section {
 	case "nodes":
-		label = "STATUS DURATION    URL"
+		label = "STATUS DURATION SIZE    URL"
 		for _, node := range status.Nodes {
 			var (
 				status   = "[?](fg-white)"
 				duration = "?" // TODO
+				length   = int64(0)
 				url      = node.URL.String()
 			)
 			if data := node.Data(); data != nil {
@@ -140,8 +141,9 @@ func MainSection(status *crawler.Status, section string) ([]string, string) {
 				case data.Code > 400:
 					status = fmt.Sprintf("[%d](fg-red)", data.Code)
 				}
+				length = data.Length
 			}
-			results = append(results, fmt.Sprintf("%s    %s          %s", status, duration, url))
+			results = append(results, fmt.Sprintf("%s    %s        %d          %s", status, duration, length, url))
 		}
 	}
 	return results, label

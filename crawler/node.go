@@ -8,6 +8,7 @@ import (
 type ResponseData struct {
 	Code    int
 	Headers http.Header
+	Length  int64
 }
 
 type Node struct {
@@ -22,6 +23,7 @@ func (n *Node) Record(res *http.Response) {
 	n.data = &ResponseData{
 		Code:    res.StatusCode,
 		Headers: res.Header,
+		Length:  res.ContentLength,
 	}
 }
 
