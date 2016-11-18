@@ -9,45 +9,45 @@ answering these questions.
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"github.com/kevinschoon/inquire/crawler"
-	"github.com/kevinschoon/inquire/ui"
+	//"github.com/kevinschoon/inquire/ui"
+	"log"
 	"net/url"
 	"os"
+	"os/signal"
 )
 
 var (
-	seed      = flag.String("seed", "", "seed URL")
-	maxDepth  = flag.Int("depth", 5, "Maximum depth")
-	disableUI = flag.Bool("disableUI", false, "Disable UI")
+	rawURL   = flag.String("seed", "", "Seed URL")
+	maxDepth = flag.Int("depth", 5, "Maximum depth")
+	debug    = flag.Bool("debug", false, "Debug crawler")
 )
 
 func main() {
 	flag.Parse()
-	u, err := url.Parse(*seed)
+	seed, err := url.Parse(*rawURL)
 	if err != nil {
 		fmt.Println("Error: ", err.Error())
 		os.Exit(1)
 	}
-	c := crawler.NewCrawler(u, *maxDepth)
-	go func() {
-		if err = c.Crawl(); err != nil {
-			fmt.Println("Error: ", err.Error())
-			os.Exit(1)
+	var buf bytes.Buffer
+	logger := log.New(&buf, "", log.LstdFlags)
+	c := crawler.NewCrawler(&crawler.Options{
+		Seed:     seed,
+		MaxDepth: *maxDepth,
+		Matcher:  &crawler.DefaultMatcher{Seed: seed},
+		Parser:   &crawler.DefaultParser{Seed: seed},
+		Logger:   logger,
+	})
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt)
+	if *debug {
+		logger.SetOutput(os.Stdout)
+		if err := c.Run(shutdown); err != nil {
+			log.Fatal(err)
 		}
-	}()
-	if err = ui.UI(c); err != nil {
-		fmt.Println("Error: ", err.Error())
-		os.Exit(1)
 	}
-
-	/*
-		if !*disableUI {
-			if err = ui.UI(c); err != nil {
-				fmt.Println("Error: ", err.Error())
-				caught = err
-			}
-		}
-	*/
 }

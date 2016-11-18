@@ -1,65 +1,89 @@
 package crawler
 
 import (
+	"log"
 	"net/http"
 	"net/url"
-	"time"
+	"os"
+	"sync"
 
 	"github.com/PuerkitoBio/fetchbot"
 )
 
 // Return a fetchbot Mux
-func mux(recorder *Recorder, parser Parser, out chan *url.URL) *fetchbot.Mux {
+func mux(crawler *Crawler) *fetchbot.Mux {
 	mux := fetchbot.NewMux()
 	mux.Response().Method("GET").Handler(fetchbot.HandlerFunc(
 		func(ctx *fetchbot.Context, res *http.Response, err error) {
 			// Parent is the current response we are recording
-			parent := recorder.RecordResponse(res, err)
+			parent := crawler.recorder.RecordResponse(res, err)
 			// Array of all links contained in the response
-			for _, link := range parser.Links(res) {
+			for _, link := range crawler.opts.Parser.Links(res) {
 				// Record the link as a Node. If the link was already
 				// recorded the existing Node is returned.
-				recorder.RecordLink(parent, link)
-				out <- link
+				crawler.recorder.RecordLink(parent, link)
+				crawler.scheduler.in <- link
 			}
 		}))
 	return mux
 }
 
+type Options struct {
+	Seed     *url.URL
+	Logger   *log.Logger
+	MaxDepth int
+	Matcher  Matcher
+	Parser   Parser
+}
+
+func (c *Crawler) Block() {}
+
 type Crawler struct {
-	Seed      *url.URL
-	Recorder  *Recorder
-	Scheduler *Scheduler
-	maxDepth  int
-	depth     int
-	parser    Parser
-	matcher   Matcher
+	recorder  *Recorder
+	scheduler *Scheduler
 	fetcher   *fetchbot.Fetcher
+	log       *log.Logger
+	opts      *Options
 	running   bool
 }
 
 // NewCrawler returns a new Crawler structure
-func NewCrawler(seed *url.URL, max int) *Crawler {
+func NewCrawler(opts *Options) *Crawler {
 	crawler := &Crawler{
-		Seed:      seed,
-		Recorder:  NewRecorder(),
-		Scheduler: NewScheduler(max),
-		parser:    &DefaultParser{Seed: seed},
-		matcher:   &DefaultMatcher{seed: seed},
+		recorder:  NewRecorder(opts),
+		scheduler: NewScheduler(opts),
+		opts:      opts,
+		log:       opts.Logger,
 	}
-	crawler.fetcher = fetchbot.New(mux(crawler.Recorder, crawler.parser, crawler.Scheduler.in))
-	crawler.fetcher.AutoClose = true
-	crawler.fetcher.WorkerIdleTTL = 15 * time.Second
+	crawler.fetcher = fetchbot.New(mux(crawler))
+	crawler.log.Println("Crawler initialized")
 	return crawler
 }
 
-func (crawler *Crawler) Crawl() error {
-	// Start processing
+func (crawler *Crawler) Run(shutdown chan os.Signal) error {
+	var wg sync.WaitGroup
+	wg.Add(2)
 	q := crawler.fetcher.Start()
-	if _, err := q.SendStringGet(crawler.Seed.String()); err != nil {
+	if _, err := q.SendStringGet(crawler.opts.Seed.String()); err != nil {
 		return err
 	}
-	go func() { crawler.Scheduler.Start(q, crawler.matcher) }()
-	q.Block()
+
+	go func() {
+		defer wg.Done()
+		crawler.scheduler.Run(q)
+	}()
+
+	go func() {
+		defer wg.Done()
+		q.Block()
+	}()
+
+	go func() {
+		sig := <-shutdown
+		crawler.scheduler.shutdown <- sig
+		q.Cancel()
+	}()
+
+	wg.Wait()
 	return nil
 }

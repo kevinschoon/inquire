@@ -11,17 +11,17 @@ type Matcher interface {
 // Match is used to evaluate a Node and
 // determine if it should be crawled.
 type DefaultMatcher struct {
-	seed *url.URL
+	Seed *url.URL
 }
 
 // Match matches a given Node
 func (m DefaultMatcher) Match(u *url.URL) bool {
 	switch {
 	// Never re-crawl initial seed
-	case m.seed.String() == u.String():
+	case m.Seed.String() == u.String():
 		return false
 	// Never crawl outside of the seed domain
-	case m.seed.Host != u.Host:
+	case m.Seed.Host != u.Host:
 		return false
 	}
 	return true
