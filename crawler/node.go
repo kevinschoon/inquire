@@ -3,12 +3,14 @@ package crawler
 import (
 	"net/http"
 	"net/url"
+	"time"
 )
 
 type ResponseData struct {
-	Code    int
-	Headers http.Header
-	Length  int64
+	Code     int
+	Headers  http.Header
+	Length   int64
+	Duration time.Duration
 }
 
 type Node struct {
@@ -19,11 +21,12 @@ type Node struct {
 }
 
 // Record an HTTP Response
-func (n *Node) Record(res *http.Response) {
+func (n *Node) Record(d time.Duration, res *http.Response) {
 	n.data = &ResponseData{
-		Code:    res.StatusCode,
-		Headers: res.Header,
-		Length:  res.ContentLength,
+		Duration: d,
+		Code:     res.StatusCode,
+		Headers:  res.Header,
+		Length:   res.ContentLength,
 	}
 }
 

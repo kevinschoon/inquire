@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"github.com/gonum/graph/simple"
+	"github.com/kevinschoon/fetchbot"
 	"log"
 	"net/http"
 	"net/url"
@@ -37,7 +38,7 @@ func (r *Recorder) Nodes() []*Node {
 }
 
 // RecordResponse creates (or updates) a node with the http.Response
-func (r *Recorder) RecordResponse(res *http.Response, err error) *Node {
+func (r *Recorder) RecordResponse(ctx *fetchbot.Context, res *http.Response, err error) *Node {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 	var node *Node
@@ -54,7 +55,7 @@ func (r *Recorder) RecordResponse(res *http.Response, err error) *Node {
 		}
 		r.graph.AddNode(node)
 	}
-	node.Record(res)
+	node.Record(ctx.Duration, res)
 	r.nodes[key] = node.ID()
 	return node
 }

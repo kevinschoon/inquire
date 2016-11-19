@@ -1,7 +1,7 @@
 package crawler
 
 import (
-	"github.com/PuerkitoBio/fetchbot"
+	"github.com/kevinschoon/fetchbot"
 	"log"
 	"net/url"
 	"os"

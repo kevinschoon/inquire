@@ -8,6 +8,7 @@ import (
 	"github.com/gizak/termui"
 	"github.com/kevinschoon/inquire/crawler"
 	"os"
+	"time"
 )
 
 // UI runs the crawler and updates the user's console
@@ -138,7 +139,7 @@ func MainSection(status *crawler.Status, section string) ([]string, string) {
 		for _, node := range status.Nodes {
 			var (
 				status   = "[?](fg-white)"
-				duration = "?" // TODO
+				duration = time.Duration(0)
 				length   = int64(0)
 				url      = node.URL.String()
 			)
@@ -150,8 +151,9 @@ func MainSection(status *crawler.Status, section string) ([]string, string) {
 					status = fmt.Sprintf("[%d](fg-red)", data.Code)
 				}
 				length = data.Length
+				duration = data.Duration
 			}
-			results = append(results, fmt.Sprintf("%s    %s        %d          %s", status, duration, length, url))
+			results = append(results, fmt.Sprintf("%s    %s        %d          %s", status, duration.String(), length, url))
 		}
 	case "schedule":
 		label = "SCHEDULE"

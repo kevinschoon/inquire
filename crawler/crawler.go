@@ -9,7 +9,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/PuerkitoBio/fetchbot"
+	"github.com/kevinschoon/fetchbot"
 )
 
 // Return a fetchbot Mux
@@ -18,7 +18,7 @@ func mux(crawler *Crawler) *fetchbot.Mux {
 	mux.Response().Method("GET").Handler(fetchbot.HandlerFunc(
 		func(ctx *fetchbot.Context, res *http.Response, err error) {
 			// Parent is the current response we are recording
-			parent := crawler.recorder.RecordResponse(res, err)
+			parent := crawler.recorder.RecordResponse(ctx, res, err)
 			// Array of all links contained in the response
 			for _, link := range crawler.opts.Parser.Links(res) {
 				// Record the link as a Node. If the link was already
