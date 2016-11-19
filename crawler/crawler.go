@@ -1,6 +1,8 @@
 package crawler
 
 import (
+	"bytes"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -34,13 +36,16 @@ type Options struct {
 	MaxDepth int
 	Matcher  Matcher
 	Parser   Parser
+	Debug    bool
 }
 
 type Status struct {
-	Running bool
-	Depth   int
-	Options *Options
-	Nodes   []*Node
+	Running  bool
+	Depth    int
+	Options  *Options
+	Nodes    []*Node
+	Schedule []string
+	Logs     []string
 }
 
 type Crawler struct {
@@ -50,6 +55,7 @@ type Crawler struct {
 	log       *log.Logger
 	opts      *Options
 	running   bool
+	buf       bytes.Buffer
 }
 
 // NewCrawler returns a new Crawler structure
@@ -60,17 +66,37 @@ func NewCrawler(opts *Options) *Crawler {
 		opts:      opts,
 		log:       opts.Logger,
 	}
+	// If we are not debugging send logs to a
+	// buffer for consumption in the UI.
+	// TODO switch to leveled library?
+	if !opts.Debug {
+		crawler.log.SetOutput(io.Writer(&crawler.buf))
+	}
 	crawler.fetcher = fetchbot.New(mux(crawler))
 	crawler.log.Println("Crawler initialized")
 	return crawler
 }
 
 func (crawler Crawler) Status() *Status {
+	logs := []string{}
+	for {
+		line, err := crawler.buf.ReadString(byte('\n'))
+		if err != nil { // Should be io.EOF
+			break
+		}
+		logs = append(logs, line)
+	}
+	schedule := []string{}
+	for key, _ := range crawler.scheduler.schedule {
+		schedule = append(schedule, key)
+	}
 	return &Status{
-		Running: crawler.running,
-		Depth:   crawler.scheduler.Depth(),
-		Options: crawler.opts,
-		Nodes:   crawler.recorder.Nodes(),
+		Running:  crawler.running,
+		Depth:    crawler.scheduler.Depth(),
+		Options:  crawler.opts,
+		Nodes:    crawler.recorder.Nodes(),
+		Schedule: schedule,
+		Logs:     logs,
 	}
 }
 

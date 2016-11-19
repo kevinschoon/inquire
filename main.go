@@ -9,7 +9,6 @@ answering these questions.
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"github.com/kevinschoon/inquire/crawler"
@@ -33,19 +32,18 @@ func main() {
 		fmt.Println("Error: ", err.Error())
 		os.Exit(1)
 	}
-	var buf bytes.Buffer
-	logger := log.New(&buf, "", log.LstdFlags)
+	logger := log.New(os.Stdout, "", log.LstdFlags)
 	c := crawler.NewCrawler(&crawler.Options{
 		Seed:     seed,
 		MaxDepth: *maxDepth,
 		Matcher:  &crawler.DefaultMatcher{Seed: seed},
 		Parser:   &crawler.DefaultParser{Seed: seed},
 		Logger:   logger,
+		Debug:    *debug,
 	})
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt)
 	if *debug {
-		logger.SetOutput(os.Stdout)
 		if err := c.Run(shutdown); err != nil {
 			log.Fatal(err)
 		}

@@ -96,6 +96,14 @@ func UI(c *crawler.Crawler, shutdown chan os.Signal) error {
 		termui.Render(termui.Body)
 	})
 
+	// Display Logs
+	termui.Handle("/sys/kbd/l", func(termui.Event) {
+		currentSection = "logs"
+		status := c.Status()
+		mainSection.Items, mainSection.BorderLabel = MainSection(status, currentSection)
+		termui.Render(termui.Body)
+	})
+
 	termui.Loop()
 	return nil
 }
@@ -120,7 +128,7 @@ func LeftStatus(s *crawler.Status) []string {
 }
 
 // MainSection updates the main section of the terminal
-// It returns the section data and boader label
+// It returns the section data and boader label.
 func MainSection(status *crawler.Status, section string) ([]string, string) {
 	var label string
 	results := []string{}
@@ -145,6 +153,12 @@ func MainSection(status *crawler.Status, section string) ([]string, string) {
 			}
 			results = append(results, fmt.Sprintf("%s    %s        %d          %s", status, duration, length, url))
 		}
+	case "schedule":
+		label = "SCHEDULE"
+		results = status.Schedule
+	case "logs":
+		label = "LOGS"
+		results = status.Logs
 	}
 	return results, label
 }
